@@ -1,0 +1,583 @@
+---
+title: "Final Project DAM Exam"
+author: "Josefine Jensen, Sissel Breckling, Freja Ipsen og Mathilde Petersen"
+date: "2026-05-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Install packages needed
+install.packages(c(
+  "tidyverse",
+  "tidytext",
+  "quanteda",
+  "topicmodels",
+  "wordcloud",
+  "widyr",
+  "igraph"
+))
+
+
+#Load packages
+library(tidyverse)
+library(tidytext)
+library(quanteda)
+library(topicmodels)
+library(wordcloud)
+library(widyr)
+library(igraph)
+
+
+#Load datasæt
+songs<-read.csv("data/all_songs_data_processed.csv")
+library(tidyverse)
+
+#Se datasættet
+head(songs)
+
+#Se kolonner
+colnames(songs)
+
+#Lav alt til små bogstaver
+songs$Lyrics <- tolower(songs$Lyrics)
+
+#Del lyrics op i ord
+lyrics_words <- songs %>%
+  unnest_tokens(word, Lyrics)
+
+#Fjern stopord
+data("stop_words")
+
+custom_stopwords <- stop_words 
+
+custom_stopwords <- custom_stopwords %>%
+  filter(!word %in% c(
+    "she",
+    "her",
+    "hers",
+    "woman",
+    "girl",
+    "lady",
+    "queen",
+    "baby",
+    "him",
+    "he",
+    "his",
+    "she's",
+    "he's"
+  )) 
+
+lyrics_words <- lyrics_words %>%
+  anti_join(custom_stopwords) 
+
+
+#Frekvensanalyse
+word_count <- lyrics_words %>%
+  count(word, sort = TRUE)
+
+head(word_count, 20)
+
+#Visualisering af topord
+word_count %>%
+  slice_max(n, n = 10) %>%
+  ggplot(aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "purple") +
+  coord_flip()
+
+#Liste over kvinde-relaterede ord
+female_words <- c(
+  "bitch",
+  "she",
+  "woman",
+  "queen",
+  "she",
+  "her",
+  "hers",
+  "women",
+  "girl",
+  "lady",
+  "wife",
+  "mother",
+  "mama",
+  "princess",
+  "ladies"
+)
+# reduceret liste
+female_words2 <- c(
+  "bitch"
+)
+
+#Frekvens af kvindeord
+female_freq <- lyrics_words %>%
+  filter(word %in% female_words) %>%
+  count(word, sort = TRUE)
+
+female_freq
+
+#Tidsdimension
+female_time <- lyrics_words %>%
+  filter(word %in% female_words) %>%
+  count(Year, word)
+
+ggplot(female_time,
+       aes(x = Year, y = n, color = word)) +
+  geom_line() +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(1960, 2023, by = 10)) +
+  labs(
+    title = "Udviklingen i ord der beskriver kvinder 1959-2023",
+    x = "År",
+    y = "Antal forekomster"
+  )
+
+#Sentimentanalyse
+#Download sentiment-ordbog
+get_sentiments(lexicon = "afinn")
+
+bing <-get_sentiments("bing")
+
+lyrics_words <- songs %>%
+  unnest_tokens(word, Lyrics) %>%
+  group_by(Song.Title) %>%
+  mutate(position = row_number()) %>%
+  ungroup()
+
+female_context <- lyrics_words %>%
+  filter(word %in% female_words) %>%
+  select(Song.Title, position) %>%
+  rename(female_pos = position)
+
+context_words <- lyrics_words %>%
+  inner_join(female_context, by = "Song.Title") %>%
+  filter(abs(position - female_pos) <= 2)
+
+bing <- get_sentiments("bing")
+
+female_descriptions <- context_words %>%
+  inner_join(bing, by = "word")
+
+#visualiseringer, positiv/negativ
+female_descriptions %>%
+  count(sentiment) %>%
+  ggplot(aes(x = sentiment, y = n, fill = sentiment)) +
+  geom_col() +
+  theme_minimal() +
+  labs(
+    title = "Positive vs negative beskrivelser af kvinder i sangtekster",
+    x = "",
+    y = "Antal ord"
+  )
+
+#positiv/negativ adjektiver
+songs$Lyrics <- tolower(songs$Lyrics)
+
+lyrics_words <- songs %>%
+  unnest_tokens(word, Lyrics)
+
+lyrics_words <- lyrics_words %>%
+  group_by(Song.Title) %>%
+  mutate(position = row_number()) %>%
+  ungroup()
+
+female_mentions <- lyrics_words %>%
+  filter(word %in% female_words)
+
+#gem positioner
+female_context <- female_mentions %>%
+  select(Song.Title, position) %>%
+  rename(female_pos = position)
+#nærliggende ord
+context_words <- lyrics_words %>%
+  inner_join(female_context, by = "Song.Title") %>%
+  filter(abs(position - female_pos) <= 2)
+#fjern kvindeord til analysedelen
+context_words <- context_words %>%
+  filter(!word %in% female_words)
+#sentiment ordbog
+bing <- get_sentiments("bing")
+
+female_descriptions <- context_words %>%
+  inner_join(bing, by = "word")
+
+female_descriptions %>%
+  count(word, sentiment, sort = TRUE)
+#visualisering over tid
+female_time_sentiment <- female_descriptions %>%
+  count(Year, sentiment)
+
+ggplot(female_time_sentiment,
+       aes(x = Year,
+           y = n,
+           color = sentiment)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(
+    title = "Positive og negative beskrivelser af kvinder i amerikanske hits",
+    x = "År",
+    y = "Antal sentimentord",
+    color = "Sentiment"
+  )
+#peaks i grafen
+positive_peaks <- female_time_sentiment %>%
+  filter(sentiment == "positive") %>%
+  slice_max(n, n = 5)
+
+positive_peaks
+
+negative_peaks <- female_time_sentiment %>%
+  filter(sentiment == "negative") %>%
+  slice_max(n, n = 5)
+
+negative_peaks
+
+install.packages("ggrepel")
+library(ggrepel)
+
+peak_data <- female_time_sentiment %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 3)
+
+ggplot(female_time_sentiment,
+       aes(x = Year,
+           y = n,
+           color = sentiment)) +
+  
+  geom_line(size = 1.2) +
+  
+  geom_point(data = peak_data,
+             size = 3) +
+  
+  geom_text_repel(
+    data = peak_data,
+    aes(label = Year)
+  ) +
+  
+  theme_minimal()
+
+#År hvor kurvene krydser
+crossings <- female_time_sentiment %>%
+  pivot_wider(
+    names_from = sentiment,
+    values_from = n
+  )
+
+crossings <- crossings %>%
+  mutate(diff = positive - negative)
+
+crossing_years <- crossings %>%
+  filter(abs(diff) <= 2)
+
+crossing_years
+crossing_years$label <- crossing_years$Year
+
+library(ggplot2)
+
+ggplot(female_time_sentiment,
+       aes(x = Year,
+           y = n,
+           color = sentiment)) +
+  
+  geom_line(size = 1.2) +
+  
+  geom_vline(data = crossing_years,
+             aes(xintercept = Year),
+             linetype = "dashed",
+             alpha = 0.5) +
+  
+  geom_text_repel(data = crossing_years,
+                  aes(x = Year,
+                      y = pmax(positive, negative),
+                      label = label),
+                  inherit.aes = FALSE,
+                  size = 3.5) +
+  
+  theme_minimal() +
+  labs(
+    title = "Positive og negative beskrivelser af kvinder",
+    x = "År",
+    y = "Antal sentimentord",
+    color = "Sentiment"
+  )
+
+#Area chart
+ggplot(female_time_sentiment,
+       aes(x = Year,
+           y = n,
+           fill = sentiment)) +
+  
+  geom_area(alpha = 0.6) +
+  
+  theme_minimal()
+
+#Smooth trendlines
+ggplot(female_time_sentiment,
+       aes(x = Year,
+           y = n,
+           color = sentiment)) +
+  
+  geom_smooth(se = FALSE, size = 1.5) +
+  
+  theme_minimal()
+
+#Top positive ord
+library(ggplot2)
+library(ggwordcloud)
+library(dplyr)
+
+positive_top100 <- female_descriptions %>%
+  filter(sentiment == "positive") %>%
+  count(word) %>%
+  arrange(-n) %>%
+  head(100)
+
+ggplot(data = positive_top100,
+       aes(label = word)) +
+  geom_text_wordcloud() +
+  theme_minimal()
+
+ggplot(data = positive_top100,
+       aes(label = word, size = n)) +
+  
+  geom_text_wordcloud_area(
+    aes(color = n),
+    shape = "diamond"
+  ) +
+  
+  scale_size_area(max_size = 45) +
+  
+  scale_color_gradientn(colors = c("blue", "yellow", "red")) +
+  
+  theme_minimal()
+
+#Top negative ord
+negative_top100 <- female_descriptions %>%
+  filter(sentiment == "negative") %>%
+  count(word) %>%
+  arrange(-n) %>%
+  head(100)
+
+ggplot(data = negative_top100,
+       aes(label = word)) +
+  geom_text_wordcloud() +
+  theme_minimal()
+
+ggplot(data = negative_top100,
+       aes(label = word, size = n)) +
+  
+  geom_text_wordcloud_area(
+    aes(color = n),
+    shape = "diamond"
+  ) +
+  
+  scale_size_area(max_size = 25) +
+  
+  scale_color_gradientn(colors = c("purple", "orange", "red")) +
+  
+  theme_minimal()
+
+#Udviklingsgraf over top negative ord
+top_negative_words <- female_descriptions %>%
+  filter(sentiment == "negative") %>%
+  count(word, sort = TRUE) %>%
+  slice_max(n, n = 10)
+
+top_negative_list <- top_negative_words$word
+
+negative_time <- female_descriptions %>%
+  filter(word %in% top_negative_list) %>%
+  count(Year, word)
+
+ggplot(negative_time,
+       aes(x = Year,
+           y = n,
+           color = word)) +
+  
+  geom_line(size = 0.5) +
+  
+  theme_minimal() +
+  
+  scale_x_continuous(
+    breaks = seq(1960, 2023, by = 10)
+  ) +
+  
+  labs(
+    title = "Udviklingen i negative beskrivelser af kvinder",
+    subtitle = "Top 10 negative sentimentord i Billboard Top 100",
+    x = "År",
+    y = "Antal forekomster",
+    color = "Ord"
+  )
+
+#Udviklingsgraf over top positive ord
+top_positive_words <- female_descriptions %>%
+  filter(sentiment == "positive") %>%
+  count(word, sort = TRUE) %>%
+  slice_max(n, n = 5)
+
+top_positive_list <- top_positive_words$word
+
+positive_time <- female_descriptions %>%
+  filter(word %in% top_positive_list) %>%
+  count(Year, word)
+
+ggplot(positive_time,
+       aes(x = Year,
+           y = n,
+           color = word)) +
+  
+  geom_line(size = 0.5) +
+  
+  theme_minimal() +
+  
+  scale_x_continuous(
+    breaks = seq(1960, 2023, by = 10)
+  ) +
+  
+  labs(
+    title = "Udviklingen i positive beskrivelser af kvinder",
+    subtitle = "Top 10 positive sentimentord i Billboard Top 100",
+    x = "År",
+    y = "Antal forekomster",
+    color = "Ord"
+  )
+
+#Graf over udvalgte top positive ord's udvikling over tid
+# Vælg selv hvilke ord du vil undersøge
+selected_positive_words <- c(
+  "sweet",
+  "sexy"
+)
+
+positive_time <- female_descriptions %>%
+  filter(word %in% selected_positive_words) %>%
+  count(Year, word)
+
+ggplot(positive_time,
+       aes(x = Year,
+           y = n,
+           color = word)) +
+
+  geom_line(size = 0.8) +
+
+  theme_minimal() +
+
+  scale_x_continuous(
+    breaks = seq(1960, 2023, by = 10)
+  ) +
+
+  labs(
+    title = "Udviklingen i udvalgte positive beskrivelser af kvinder",
+    subtitle = "Positive sentimentord i Billboard Top 100-sange",
+    x = "År",
+    y = "Antal forekomster",
+    color = "Ord"
+  )
+
+#Sentimentanalyse med afinn + NRC
+get_sentiments(lexicon = "nrc")
+nrc <- get_sentiments("nrc")
+head(nrc)
+
+female_nrc <- female_descriptions %>%
+  inner_join(nrc, by = "word")
+
+colnames(female_nrc)
+
+female_nrc_count <- female_nrc %>%
+  filter(!sentiment.y %in% c("positive", "negative")) %>%
+  count(sentiment.y, sort = TRUE)
+
+ggplot(female_nrc_count,
+       aes(x = reorder(sentiment.y, n),
+           y = n,
+           fill = sentiment.y)) +
+  
+  geom_col(show.legend = FALSE) +
+  
+  coord_flip() +
+  
+  scale_fill_brewer(palette = "Set2") +
+  
+  theme_classic() +
+  
+  labs(
+    title = "Emotionelle kategorier i beskrivelser af kvinder",
+    x = "Emotion",
+    y = "Antal forekomster"
+  )
+
+#Emotionelle kategorier fordelt på årtier, udvikling over tid
+female_nrc <- female_nrc %>%
+  mutate(decade = floor(Year / 10) * 10)
+
+#rename of categories
+female_nrc <- female_nrc %>%
+  rename(
+    bing_sentiment = sentiment.x,
+    emotion = sentiment.y
+  )
+
+#optælning af følelser pr. årti
+emotion_decade <- female_nrc %>%
+  filter(!emotion %in% c("positive", "negative")) %>%
+  count(decade, emotion)
+
+#Visualisering af udviklingen i emotioner pr. årti
+ggplot(emotion_decade,
+       aes(x = decade,
+           y = n,
+           color = emotion)) +
+  
+  geom_smooth(
+    se = FALSE,
+    method = "loess",
+    span = 0.8,
+    size = 1.2
+  ) +
+  
+  facet_wrap(~emotion,
+             scales = "free_y") +
+  
+  scale_x_continuous(
+    breaks = seq(1960, 2020, by = 10)
+  ) +
+  
+  theme_classic() +
+  
+  labs(
+    title = "Emotionelle kategorier i beskrivelser af kvinder over tid",
+    subtitle = "NRC sentimentanalyse fordelt på årtier",
+    x = "Årti",
+    y = "Antal forekomster"
+  )
+
+#Samlet graf
+ggplot(emotion_decade,
+       aes(x = decade,
+           y = n,
+           color = emotion)) +
+  
+  geom_smooth(
+    se = FALSE,
+    method = "loess",
+    span = 0.8,
+    size = 1.2
+  ) +
+  
+  scale_x_continuous(
+    breaks = seq(1960, 2020, by = 10)
+  ) +
+  
+  theme_classic() +
+  
+  labs(
+    title = "Emotionelle kategorier i beskrivelser af kvinder over tid",
+    subtitle = "NRC sentimentanalyse fordelt på årtier",
+    x = "Årti",
+    y = "Antal forekomster",
+    color = "Emotion"
+  )
+
